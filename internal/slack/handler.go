@@ -2,7 +2,7 @@ package slack
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -49,15 +49,22 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if shouldAct := h.svc.ShouldAct(&envelope.Event); !shouldAct {
-		web.JSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+	status, err := h.svc.Handle(r.Context(), &envelope.Event)
+	if err != nil {
+		web.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	eventData, err := json.MarshalIndent(envelope.Event, "", "  ")
-	fmt.Println("Event:\n", string(eventData))
+	switch status {
+	case "created":
+		log.Printf("slack: create-vm (workspace created)")
+	case "appended":
+		log.Printf("slack: route-to-vm (message appended)")
+	default:
+		log.Printf("slack: ignore")
+	}
 
-	web.JSON(w, http.StatusOK, map[string]string{"status": "processed"})
+	web.JSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 func parseEnvelope(body []byte) (*Envelope, error) {

@@ -8,6 +8,7 @@ import (
 	"github.com/rahulSailesh-shah/duta/internal/config"
 	"github.com/rahulSailesh-shah/duta/internal/database"
 	"github.com/rahulSailesh-shah/duta/internal/slack"
+	"github.com/rahulSailesh-shah/duta/internal/workspace"
 )
 
 func New(cfg config.Config, db *database.DB) http.Handler {
@@ -17,8 +18,9 @@ func New(cfg config.Config, db *database.DB) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// slack service and handler
-	slackSvc := slack.NewService(cfg)
+	// slack
+	slackRepo := workspace.NewRepo(db, cfg.TableName)
+	slackSvc := slack.NewService(cfg, slackRepo)
 	slack.RegisterRoutes(r, slack.NewHandler(slackSvc))
 
 	return r

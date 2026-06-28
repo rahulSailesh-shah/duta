@@ -1,38 +1,35 @@
 package slack
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
-	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/google/uuid"
 	"github.com/rahulSailesh-shah/duta/internal/config"
+	"github.com/rahulSailesh-shah/duta/internal/workspace"
 )
 
-const (
-	mentionedTTL  = 24 * time.Hour
-	mentionedSize = 4096
+type Action int
 
-	dedupeTTL  = time.Hour
-	dedupeSize = 8192
+const (
+	ActionIgnore Action = iota
+	ActionCreateWorkspace
+	ActionAppendMessage
 )
 
 type Service struct {
-	cfg config.Config
-
-	mu        sync.Mutex
-	mentioned *lru.LRU[string, struct{}]
-	seenMsgs  *lru.LRU[string, struct{}]
+	cfg  config.Config
+	repo *workspace.Repo
 }
 
-func NewService(cfg config.Config) *Service {
+func NewService(cfg config.Config, repo *workspace.Repo) *Service {
 	return &Service{
-		cfg:       cfg,
-		mentioned: lru.NewLRU[string, struct{}](mentionedSize, nil, mentionedTTL),
-		seenMsgs:  lru.NewLRU[string, struct{}](dedupeSize, nil, dedupeTTL),
+		cfg:  cfg,
+		repo: repo,
 	}
 }
 
@@ -52,30 +49,67 @@ func (s *Service) VerifySignature(timestamp, signature string, body []byte) bool
 	return hmac.Equal([]byte(expected), []byte(signature))
 }
 
-func (s *Service) ShouldAct(event *Event) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	act := false
+func (s *Service) ShouldAct(ctx context.Context, event *Event) (Action, error) {
 	switch {
-	case event.Type == "app_mention":
-		if event.ThreadTS == "" && event.Ts != "" {
-			s.mentioned.Add(event.Ts, struct{}{})
+	case event.Type == "app_mention" && event.ThreadTS == "" && event.Ts != "":
+		return ActionCreateWorkspace, nil
+	case event.ThreadTS != "":
+		ws, err := s.repo.GetWorkspace(ctx, event.Channel, event.ThreadTS)
+		if err != nil {
+			return ActionIgnore, err
 		}
-		act = true
-	case event.Type == "message" && event.ThreadTS != "":
-		_, act = s.mentioned.Get(event.ThreadTS)
+		if ws != nil {
+			return ActionAppendMessage, nil
+		}
+	}
+	return ActionIgnore, nil
+}
+
+func (s *Service) Handle(ctx context.Context, event *Event) (string, error) {
+	action, err := s.ShouldAct(ctx, event)
+	if err != nil {
+		return "", err
 	}
 
-	if !act {
-		return false
-	}
-
-	if id := event.ClientMsgID; id != "" {
-		if _, seen := s.seenMsgs.Get(id); seen {
-			return false
+	switch action {
+	case ActionCreateWorkspace:
+		now := time.Now().UTC()
+		created, err := s.repo.CreateWorkspace(ctx, workspace.Workspace{
+			ID:        uuid.NewString(),
+			Channel:   event.Channel,
+			ThreadTS:  event.Ts,
+			Status:    workspace.StatusQueued,
+			RootUser:  event.User,
+			RootText:  event.Text,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			return "", err
 		}
-		s.seenMsgs.Add(id, struct{}{})
+		if !created {
+			return "ignored", nil
+		}
+		return "created", nil
+
+	case ActionAppendMessage:
+		created, err := s.repo.AppendMessage(ctx, event.Channel, event.ThreadTS, workspace.Message{
+			Role:        workspace.RoleUser,
+			Author:      event.User,
+			Text:        event.Text,
+			SlackTS:     event.Ts,
+			ClientMsgID: event.ClientMsgID,
+			CreatedAt:   time.Now().UTC(),
+		})
+		if err != nil {
+			return "", err
+		}
+		if !created {
+			return "ignored", nil
+		}
+		return "appended", nil
+
+	default:
+		return "ignored", nil
 	}
-	return true
 }

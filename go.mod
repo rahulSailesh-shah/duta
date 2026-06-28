@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.48
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.59.0
 	github.com/go-chi/chi/v5 v5.3.0
-	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 )
 

@@ -95,20 +95,29 @@ func (r *Repo) UpdateStatus(ctx context.Context, channel, threadTS string, s Sta
 	return err
 }
 
-func (r *Repo) AppendMessage(ctx context.Context, channel, threadTS string, m Message) error {
+func (r *Repo) AppendMessage(ctx context.Context, channel, threadTS string, m Message) (bool, error) {
 	item, err := attributevalue.MarshalMap(envelope[Message]{
 		PK:   pk(channel, threadTS),
 		SK:   msgSK(m.SlackTS),
 		Item: m,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
+
 	_, err = r.db.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: &r.table,
-		Item:      item,
+		TableName:           &r.table,
+		Item:                item,
+		ConditionExpression: aws.String("attribute_not_exists(PK)"),
 	})
-	return err
+	if err != nil {
+		var ccf *types.ConditionalCheckFailedException
+		if errors.As(err, &ccf) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repo) ListMessages(ctx context.Context, channel, threadTS string, limit int32) ([]Message, error) {

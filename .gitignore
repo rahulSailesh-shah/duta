@@ -33,3 +33,5 @@ tmp/
 # cdk
 infra/infra
 infra/cdk.out/
+
+.claude/
