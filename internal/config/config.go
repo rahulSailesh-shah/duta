@@ -16,6 +16,7 @@ type Config struct {
 	AwsAccessKey       string
 	AwsSecretKey       string
 	AwsRegion          string
+	TableName          string
 	SlackSigningSecret string
 	SlackBotToken      string
 }
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 		AwsRegion:          optStr("AWS_REGION", ""),
 		SlackSigningSecret: req("SLACK_SIGNING_SECRET"),
 		SlackBotToken:      req("SLACK_BOT_TOKEN"),
+		TableName:          req("TABLE_NAME"),
 	}
 
 	if len(errs) > 0 {
